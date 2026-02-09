@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deepfake Detection</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Deepfake Detector</h1>
+      <p class="subtitle">Real-time AI Analysis</p>
+    </div>
+
+    <div class="status-section">
+      <div class="status-indicator" id="statusIndicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">Inactive</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" class="btn btn-primary">
+        Start Detection
+      </button>
+      <button id="stopBtn" class="btn btn-secondary" disabled>
+        Stop Detection
+      </button>
+    </div>
+
+    <div class="results-section" id="resultsSection" style="display: none;">
+      <h3>Analysis Results</h3>
+      
+      <div class="result-card">
+        <div class="result-label">Classification</div>
+        <div class="result-value" id="classification">-</div>
+      </div>
+
+      <div class="result-card">
+        <div class="result-label">Confidence</div>
+        <div class="result-value" id="confidence">-</div>
+      </div>
+
+      <div class="result-card">
+        <div class="result-label">Temporal Average</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="temporalProgress"></div>
+        </div>
+        <div class="result-value-small" id="temporalAvg">-</div>
+      </div>
+
+      <div class="result-card">
+        <div class="result-label">Stability Score</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="stabilityProgress"></div>
+        </div>
+        <div class="result-value-small" id="stabilityScore">-</div>
+      </div>
+
+      <div class="result-card">
+        <div class="result-label">Frames Analyzed</div>
+        <div class="result-value-small" id="framesAnalyzed">0</div>
+      </div>
+    </div>
+
+    <div style="display: none;" id="settings-section">
+      <h3>Configuration</h3>
+      <div class="setting-item">
+        <label for="backendUrl">Backend URL</label>
+        <input type="text" id="backendUrl" value="http://localhost:5000" placeholder="http://localhost:5000" />
+        <button id="testConnection" class="btn btn-small" style="margin-top: 8px; background: #28a745;">Test Backend</button>
+        <button id="testContentScript" class="btn btn-small" style="margin-top: 8px; background: #17a2b8;">Test Content Script</button>
+        <div id="connectionStatus" style="margin-top: 8px; font-size: 12px; display: none;"></div>
+      </div>
+      <div class="setting-item">
+        <label for="captureInterval">Analysis Interval</label>
+        <div class="input-with-suffix">
+          <input type="number" id="captureInterval" value="1000" min="500" max="5000" step="100" />
+          <span class="input-suffix">ms</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

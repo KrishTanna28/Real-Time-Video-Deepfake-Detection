@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+  <div id="deepfake-overlay" class="overlay-container">
+    <div class="overlay-header">
+      <h3>Deepfake Detection</h3>
+      <button id="overlay-close" class="close-btn">×</button>
+    </div>
+    
+    <div class="overlay-content">
+      <div class="status-badge" id="overlay-status">
+        <span class="status-icon">●</span>
+        <span class="status-text">Analyzing...</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Classification:</span>
+        <span class="value" id="overlay-classification">-</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Confidence:</span>
+        <span class="value" id="overlay-confidence">-</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Temporal Avg:</span>
+        <span class="value" id="overlay-temporal">-</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Stability:</span>
+        <span class="value" id="overlay-stability">-</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Frames:</span>
+        <span class="value" id="overlay-frames">0</span>
+      </div>
+    </div>
+
+    <div class="overlay-footer">
+      <button id="overlay-stop" class="stop-btn">Stop Detection</button>
+    </div>
+  </div>
+
+  <script src="overlay-script.js"></script>
+</body>
+</html>
