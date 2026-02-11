@@ -16,7 +16,7 @@ import os
 
 from face_detection import detect_bounding_box
 from frame_analysis import FrameForensicAnalyzer
-from model import DeepfakeMobileNetV3, compute_frequency_features
+from model import DeepfakeEfficientNet, compute_frequency_features
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -27,13 +27,11 @@ mtcnn = MTCNN(
     device=DEVICE
 ).to(DEVICE).eval()
 
-# Initialize enhanced model (MobileNetV3-Large + Frequency-Domain Fusion)
-print("Initializing DeepfakeMobileNetV3 (RGB + FFT/DCT fusion)...")
-model = DeepfakeMobileNetV3(pretrained=True)
+# Initialize model (EfficientNet-B0)
+print("Initializing DeepfakeEfficientNet (EfficientNet-B0)...")
+model = DeepfakeEfficientNet(pretrained=True)
 
 # Load trained deepfake detection weights if available
-import os
-
 weights_paths = [
     os.path.join(os.path.dirname(__file__), "weights", "best_model.pth")
 ]
@@ -49,22 +47,44 @@ for weights_path in weights_paths:
             else:
                 state_dict = checkpoint
             
-            # Load with strict=False — old weights may not match new architecture
+            # Load weights (should match exactly now)
             missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            if missing:
-                print(f"  New layers initialized randomly: {len(missing)} params")
-                print(f"  (Retrain with train.py for best results)")
-            print("✓ Model weights loaded successfully")
+            
+            if len(missing) == 0 and len(unexpected) == 0:
+                print("✓ All weights loaded successfully (perfect match!)")
+            elif len(missing) == 0:
+                print(f"✓ All model weights loaded ({len(unexpected)} extra keys in checkpoint ignored)")
+            else:
+                print(f"  ⚠️ {len(missing)} params missing, {len(unexpected)} unexpected")
+                print(f"  Missing: {missing[:5]}..." if len(missing) > 5 else f"  Missing: {missing}")
+            
             model_loaded = True
+            
+            # Show training info if available
+            if isinstance(checkpoint, dict):
+                if 'epoch' in checkpoint:
+                    print(f"  Checkpoint from epoch: {checkpoint['epoch']}")
+                if 'val_acc' in checkpoint:
+                    print(f"  Validation accuracy: {checkpoint['val_acc']*100:.1f}%")
+                if 'config' in checkpoint:
+                    print(f"  Training config available")
             break
         except Exception as e:
             print(f"⚠️  Warning: Could not load {weights_path}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
 if not model_loaded:
     print(f"⚠️  Warning: No trained model found")
-    print("Using pretrained ImageNet weights from MobileNetV3-Large")
+    print("Using pretrained ImageNet weights from EfficientNet-B0")
     print("NOTE: Model needs to be trained for deepfake detection — run train.py")
+else:
+    print("\n✅ TRAINED MODEL LOADED - Ready for detection!")
+    print("   - Model: EfficientNet-B0 (trained on deepfake dataset)")
+    print("   - Architecture: 1280-dim features → 512 → 256 → 1")
+    print("   - Detection threshold: 0.5")
+    print("   - Weighting: 70% face model + 30% frame forensics\n")
 
 model.to(DEVICE)
 model.eval()
@@ -76,16 +96,18 @@ class TemporalTracker:
     Tracks predictions across frames with voting-based classification
     """
     
-    def __init__(self, window_size=60, high_confidence_threshold=0.75, voting_window=10):
+    def __init__(self, window_size=60, high_confidence_threshold=0.75, voting_window=10, detection_threshold=0.5):
         """
         Args:
             window_size: Number of frames to track (60 frames ~ 2 seconds at 30fps)
             high_confidence_threshold: Threshold for high confidence detection
             voting_window: Number of frames to collect before updating verdict (default: 10)
+            detection_threshold: Threshold for classifying frame as FAKE vs REAL (default: 0.5)
         """
         self.window_size = window_size
         self.high_confidence_threshold = high_confidence_threshold
         self.voting_window = voting_window
+        self.detection_threshold = detection_threshold
         self.score_history = deque(maxlen=window_size)
         self.variance_history = deque(maxlen=30)  # Track prediction variance
         self.last_alert_time = 0
@@ -109,8 +131,11 @@ class TemporalTracker:
             variance = np.var(recent)
             self.variance_history.append(variance)
         
-        # Classify this frame: fake if probability > 0.35, else real
-        frame_class = 'FAKE' if fake_probability > 0.35 else 'REAL'
+        # Classify this frame using configurable threshold
+        frame_class = 'FAKE' if fake_probability > self.detection_threshold else 'REAL'
+        
+        # DEBUG LOGGING
+        print(f"[DEBUG] Frame vote: prob={fake_probability:.4f} > thresh={self.detection_threshold} => {frame_class}")
         
         # Add to queue (deque automatically removes oldest if full)
         self.frame_classifications.append(frame_class)
@@ -263,14 +288,29 @@ class DeepfakeDetector:
     - When no faces: uses frame-level forensic analysis only
     """
     
-    def __init__(self, enable_gradcam=False, use_tta=True, num_tta_augmentations=3):
+    def __init__(self, enable_gradcam=False, use_tta=True, num_tta_augmentations=3,
+                 detection_threshold=0.5, face_weight=0.70, forensic_weight=0.30):
+        """
+        Args:
+            enable_gradcam: Enable GradCAM visualization (slow)
+            use_tta: Use test-time augmentation for better accuracy
+            num_tta_augmentations: Number of augmentations to use
+            detection_threshold: Threshold for classifying frame as FAKE (0.0-1.0)
+            face_weight: Weight for face model prediction (0.0-1.0)
+            forensic_weight: Weight for frame forensics (0.0-1.0)
+        """
         self.enable_gradcam = enable_gradcam
         self.use_tta = use_tta  # Test-Time Augmentation
         self.num_tta_augmentations = num_tta_augmentations
+        self.detection_threshold = detection_threshold
+        self.face_weight = face_weight
+        self.forensic_weight = forensic_weight
+        
         self.temporal_tracker = TemporalTracker(
             window_size=60, 
             high_confidence_threshold=0.75,
-            voting_window=10  # Update verdict every 10 frames
+            voting_window=10,  # Update verdict every 10 frames
+            detection_threshold=detection_threshold
         )
         self.frame_count = 0
         
@@ -345,10 +385,15 @@ class DeepfakeDetector:
             
             # Get prediction with both RGB + frequency inputs
             with torch.no_grad():
-                logit = model(input_face, freq_tensor).squeeze(0)
-                output = torch.sigmoid(logit)
-                return output.item()
-        except:
+                logit = model(input_face, freq_tensor).squeeze()
+                sigmoid_out = torch.sigmoid(logit).item()
+                
+                # DEBUG LOGGING
+                print(f"[DEBUG] Raw logit: {logit.item():.4f} | Sigmoid (fake_prob): {sigmoid_out:.4f}")
+                
+                return sigmoid_out
+        except Exception as e:
+            print(f"[DEBUG] _single_prediction error: {e}")
             return None
     
     def analyze_face_with_tta(self, face_region):
@@ -475,11 +520,16 @@ class DeepfakeDetector:
             if fake_probability is None:
                 return None, None, None
             
+            raw_prob = fake_probability
+            
             # Apply calibration if available
             fake_probability = self.apply_calibration(fake_probability)
             
             # Apply heuristics (frequency analysis, quality checks)
             fake_probability = self.apply_heuristics(fake_probability, face_region)
+            
+            # DEBUG LOGGING - face probability goes directly to voting now
+            print(f"[DEBUG] Face model: raw={raw_prob:.4f} | final={fake_probability:.4f} | Threshold={self.detection_threshold}")
             
             # GradCAM disabled for TTA mode (too slow)
             gradcam_img = None
@@ -548,7 +598,7 @@ class DeepfakeDetector:
         face_results = []
         
         if len(faces) > 0:
-            # --- Face(s) detected: combine face model + frame forensics ---
+            # --- Face(s) detected: use face model as PRIMARY signal ---
             for (x, y, w, h) in faces:
                 face_region = frame[y:y + h, x:x + w]
                 
@@ -558,12 +608,13 @@ class DeepfakeDetector:
                 if fake_prob is None:
                     continue
                 
-                # Combine face model (70%) with frame forensics (30%)
+                # Use FACE probability directly for voting (it's the trained signal!)
+                # Frame forensics is for display/logging only when face is detected
                 frame_forensic_prob = frame_forensic['fake_probability']
-                combined_prob = 0.70 * fake_prob + 0.30 * frame_forensic_prob
+                combined_prob = fake_prob  # Use face model directly - this is the trained signal!
                 
-                # Layer 2: Update temporal tracker with combined score
-                self.temporal_tracker.update(combined_prob)
+                # Layer 2: Update temporal tracker with FACE score (not diluted)
+                self.temporal_tracker.update(fake_prob)
                 confidence_level = self.temporal_tracker.get_confidence_level()
                 
                 # Check if we should trigger deeper analysis
@@ -572,11 +623,11 @@ class DeepfakeDetector:
                     forensic_frame = frame.copy()
                 
                 # Draw overlay
-                frame = self.draw_detection_overlay(frame, x, y, w, h, combined_prob, confidence_level)
+                frame = self.draw_detection_overlay(frame, x, y, w, h, fake_prob, confidence_level)
                 
                 face_results.append({
                     'face_prob': float(fake_prob),
-                    'combined_prob': float(combined_prob),
+                    'combined_prob': float(fake_prob),  # Same as face_prob now
                     'bbox': {'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
                 })
                 
@@ -584,8 +635,7 @@ class DeepfakeDetector:
                 if self.frame_count % 10 == 0:
                     voting_stats = self.temporal_tracker.get_voting_stats()
                     print(f"Frame {self.frame_count} | Face: {fake_prob*100:.0f}% | "
-                          f"Frame: {frame_forensic_prob*100:.0f}% | "
-                          f"Combined: {combined_prob*100:.0f}% | "
+                          f"Forensic: {frame_forensic_prob*100:.0f}% | "
                           f"Verdict: {confidence_level} | "
                           f"Votes [F:{voting_stats['fake_count']} R:{voting_stats['real_count']}]")
         else:
@@ -667,10 +717,13 @@ class DeepfakeDetector:
         return frame
 
 
-# Global detector instance with enhanced features
+# Global detector instance - optimized for speed and accuracy with trained model
 detector = DeepfakeDetector(
-    use_tta=False,             # Disabled for real-time speed
-    num_tta_augmentations=1    # Single prediction for speed
+    use_tta=False,               # Disabled for real-time speed
+    num_tta_augmentations=1,     # Single prediction for speed
+    detection_threshold=0.5,     # Standard threshold for trained model
+    face_weight=0.70,           # 70% trained face model (primary signal)
+    forensic_weight=0.30         # 30% frame forensics (supporting signal)
 )
 
 

@@ -156,7 +156,7 @@ def analyze_frame():
         detector.frame_count += 1
 
         if len(faces) > 0:
-            # ---- FACE(S) DETECTED: combine face model + frame forensics ----
+            # ---- FACE(S) DETECTED: use face model as PRIMARY signal ----
             x, y, w, h = faces[0]  # Primary face
             face_region = frame[y:y + h, x:x + w]
 
@@ -164,11 +164,11 @@ def analyze_frame():
             fake_prob, real_score, gradcam = detector.analyze_face(face_region)
 
             if fake_prob is not None:
-                # Combine: 70% face model + 30% frame forensics
-                combined_prob = 0.70 * fake_prob + 0.30 * frame_forensic_prob
+                # Use FACE probability directly for voting (it's the trained signal!)
+                # Frame forensics is supplementary info, not used in voting
 
-                # Update temporal tracker with combined score
-                detector.temporal_tracker.update(combined_prob)
+                # Update temporal tracker with FACE score directly
+                detector.temporal_tracker.update(fake_prob)
                 confidence_level = detector.temporal_tracker.get_confidence_level()
                 temporal_avg = detector.temporal_tracker.get_temporal_average()
                 stability = detector.temporal_tracker.get_stability_score()
@@ -179,10 +179,10 @@ def analyze_frame():
                     'success': True,
                     'analysis_mode': 'face+frame',
                     'faces_detected': len(faces),
-                    'fake_probability': float(combined_prob),
+                    'fake_probability': float(fake_prob),  # Use face prob directly
                     'face_probability': float(fake_prob),
                     'frame_forensic_probability': float(frame_forensic_prob),
-                    'real_probability': float(1 - combined_prob),
+                    'real_probability': float(1 - fake_prob),
                     'confidence_level': confidence_level,
                     'temporal_average': float(temporal_avg),
                     'stability_score': float(stability),
@@ -204,8 +204,7 @@ def analyze_frame():
 
                 logger.info(
                     f"Frame {detector.frame_count} | Face: {fake_prob*100:.0f}% | "
-                    f"Frame: {frame_forensic_prob*100:.0f}% | "
-                    f"Combined: {combined_prob*100:.0f}% | "
+                    f"Forensic: {frame_forensic_prob*100:.0f}% | "
                     f"Verdict: {confidence_level} | {processing_time:.0f}ms"
                 )
 
@@ -278,7 +277,7 @@ if __name__ == '__main__':
     print(f"  Device: {DEVICE}")
     print(f"  Model loaded: {model is not None}")
     print(f"  Capabilities:")
-    print(f"    - Face detection (MobileNetV3-Large + FFT/DCT fusion)")
+    print(f"    - Face detection (EfficientNet-B0)")
     print(f"    - Frequency-domain analysis (FFT magnitude + DCT)")
     print(f"    - Frame-level forensics (Noise, ELA, Edge, Color)")
     print(f"    - Temporal consistency tracking")
