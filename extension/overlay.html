@@ -19,6 +19,11 @@
       </div>
 
       <div class="result-item">
+        <span class="label">Mode:</span>
+        <span class="value" id="overlay-mode">-</span>
+      </div>
+
+      <div class="result-item">
         <span class="label">Classification:</span>
         <span class="value" id="overlay-classification">-</span>
       </div>
@@ -41,6 +46,41 @@
       <div class="result-item">
         <span class="label">Frames:</span>
         <span class="value" id="overlay-frames">0</span>
+      </div>
+
+      <div class="result-item">
+        <span class="label">Speed:</span>
+        <span class="value" id="overlay-speed">-</span>
+      </div>
+
+      <div class="forensic-section" id="forensic-section" style="display: none;">
+        <div class="forensic-title">Forensic Signals</div>
+        <div class="forensic-grid">
+          <div class="forensic-item">
+            <span class="forensic-label">FFT</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-frequency"></div></div>
+          </div>
+          <div class="forensic-item">
+            <span class="forensic-label">Noise</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-noise"></div></div>
+          </div>
+          <div class="forensic-item">
+            <span class="forensic-label">ELA</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-ela"></div></div>
+          </div>
+          <div class="forensic-item">
+            <span class="forensic-label">Edge</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-edge"></div></div>
+          </div>
+          <div class="forensic-item">
+            <span class="forensic-label">Color</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-color"></div></div>
+          </div>
+          <div class="forensic-item">
+            <span class="forensic-label">Temporal</span>
+            <div class="forensic-bar"><div class="forensic-fill" id="sig-temporal"></div></div>
+          </div>
+        </div>
       </div>
     </div>
 

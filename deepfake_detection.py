@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from facenet_pytorch import MTCNN
-from efficientnet_pytorch import EfficientNet
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image
@@ -16,6 +15,8 @@ import pickle
 import os
 
 from face_detection import detect_bounding_box
+from frame_analysis import FrameForensicAnalyzer
+from model import DeepfakeMobileNetV3, compute_frequency_features
 
 DEVICE = "cuda:0" if torch.cuda.is_available() else "cpu"
 
@@ -26,46 +27,9 @@ mtcnn = MTCNN(
     device=DEVICE
 ).to(DEVICE).eval()
 
-# Create EfficientNet-B0 model with custom classifier for binary deepfake detection
-class DeepfakeEfficientNet(nn.Module):
-    """EfficientNet-B0 backbone with binary classification head"""
-    def __init__(self, pretrained=True, dropout=0.5):
-        super(DeepfakeEfficientNet, self).__init__()
-        # Load pretrained EfficientNet-B0
-        if pretrained:
-            self.efficientnet = EfficientNet.from_pretrained('efficientnet-b0')
-        else:
-            self.efficientnet = EfficientNet.from_name('efficientnet-b0')
-        
-        # Get the number of features from the last layer
-        num_features = self.efficientnet._fc.in_features
-        
-        # Replace the classifier with GENERALIZED architecture
-        # This matches the train_generalized_colab.py model
-        # More layers with BatchNorm for better generalization
-        self.efficientnet._fc = nn.Sequential(
-            nn.Dropout(dropout),
-            nn.Linear(num_features, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.7),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Dropout(dropout * 0.5),
-            nn.Linear(256, 1)
-        )
-    
-    def forward(self, x):
-        return self.efficientnet(x)
-    
-    def get_feature_extractor(self):
-        """Get the last convolutional layer for GradCAM"""
-        return self.efficientnet._conv_head
-
-# Initialize model
-print("Initializing EfficientNet-B0 for deepfake detection...")
-model = DeepfakeEfficientNet(pretrained=True)
+# Initialize enhanced model (MobileNetV3-Large + Frequency-Domain Fusion)
+print("Initializing DeepfakeMobileNetV3 (RGB + FFT/DCT fusion)...")
+model = DeepfakeMobileNetV3(pretrained=True)
 
 # Load trained deepfake detection weights if available
 import os
@@ -77,26 +41,20 @@ weights_paths = [
 model_loaded = False
 for weights_path in weights_paths:
     if os.path.exists(weights_path):
-        print(f"Loading trained model from {weights_path}")
+        print(f"Loading trained weights from {weights_path}")
         try:
             checkpoint = torch.load(weights_path, map_location=DEVICE)
-            # Handle potential state dict key mismatches
             if "model_state_dict" in checkpoint:
                 state_dict = checkpoint["model_state_dict"]
             else:
                 state_dict = checkpoint
             
-            # Fix key mismatch (net. -> efficientnet.)
-            new_state_dict = {}
-            for key, value in state_dict.items():
-                if key.startswith('net.'):
-                    new_key = key.replace('net.', 'efficientnet.')
-                    new_state_dict[new_key] = value
-                else:
-                    new_state_dict[key] = value
-            
-            model.load_state_dict(new_state_dict, strict=False)
-            print("✓ Trained model loaded successfully")
+            # Load with strict=False — old weights may not match new architecture
+            missing, unexpected = model.load_state_dict(state_dict, strict=False)
+            if missing:
+                print(f"  New layers initialized randomly: {len(missing)} params")
+                print(f"  (Retrain with train.py for best results)")
+            print("✓ Model weights loaded successfully")
             model_loaded = True
             break
         except Exception as e:
@@ -105,8 +63,8 @@ for weights_path in weights_paths:
 
 if not model_loaded:
     print(f"⚠️  Warning: No trained model found")
-    print("Using pretrained ImageNet weights from EfficientNet-B0")
-    print("NOTE: Model needs to be retrained for optimal deepfake detection")
+    print("Using pretrained ImageNet weights from MobileNetV3-Large")
+    print("NOTE: Model needs to be trained for deepfake detection — run train.py")
 
 model.to(DEVICE)
 model.eval()
@@ -277,8 +235,10 @@ class TemporalTracker:
     
     def reset(self):
         """Reset the tracker - forget all previous verdicts and fake probabilities"""
-        # Clear all history
+        # Save counts before clearing for logging
+        prev_score_count = len(self.score_history)
         prev_window_len = len(self.frame_classifications)
+        prev_verdict = self.current_verdict
         
         self.score_history.clear()
         self.variance_history.clear()
@@ -289,16 +249,19 @@ class TemporalTracker:
         self.current_verdict = None
         
         print("✓ Temporal tracker reset - ALL previous data cleared:")
-        print(f"  - Cleared {prev_history_len} previous fake probabilities")
-        print(f"  - Cleared queue of {prev_window_len} frame classificationsious data cleared:")
-        print(f"  - Cleared {prev_history_len} previous fake probabilities")
-        print(f"  - Cleared 10-frame voting window")
+        print(f"  - Cleared {prev_score_count} previous fake probabilities")
+        print(f"  - Cleared queue of {prev_window_len} frame classifications")
         print(f"  - Previous verdict '{prev_verdict}' forgotten")
         print(f"  - Verdict reset to None (UNCERTAIN)")
 
 
 class DeepfakeDetector:
-    """3-Layer Deepfake Detection System with Enhanced Features"""
+    """Multi-Signal Deepfake Detection System
+    
+    Works on ANY video - with or without visible faces:
+    - When faces detected: combines face model + frame forensics
+    - When no faces: uses frame-level forensic analysis only
+    """
     
     def __init__(self, enable_gradcam=False, use_tta=True, num_tta_augmentations=3):
         self.enable_gradcam = enable_gradcam
@@ -310,6 +273,13 @@ class DeepfakeDetector:
             voting_window=10  # Update verdict every 10 frames
         )
         self.frame_count = 0
+        
+        # Frame-level forensic analyzer (works without faces)
+        self.frame_analyzer = FrameForensicAnalyzer(analysis_size=(256, 256))
+        
+        # Adaptive analysis: run full forensics every N frames, fast analysis otherwise
+        self.full_forensic_interval = 3  # Full analysis every 3rd frame
+        self.last_frame_forensic_result = None
         
         # Load calibrator if available
         self.calibrator = None
@@ -326,9 +296,12 @@ class DeepfakeDetector:
         """Reset detector state (call when stopping detection)"""
         self.temporal_tracker.reset()
         self.frame_count = 0
+        self.frame_analyzer.reset()
+        self.last_frame_forensic_result = None
         print("=" * 50)
         print("✓ Detector completely reset")
         print("✓ Frame count reset to 0")
+        print("✓ Frame forensic analyzer reset")
         print("✓ Ready for fresh detection session")
         print("=" * 50)
         
@@ -348,7 +321,7 @@ class DeepfakeDetector:
         return processed
     
     def _single_prediction(self, face_region):
-        """Single prediction without augmentation"""
+        """Single prediction with frequency-domain features"""
         try:
             # Preprocess face
             input_face = Image.fromarray(cv2.cvtColor(face_region, cv2.COLOR_BGR2RGB))
@@ -366,9 +339,13 @@ class DeepfakeDetector:
             std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(DEVICE)
             input_face = (input_face - mean) / std
             
-            # Get prediction
+            # Compute frequency features from face region
+            freq_features = compute_frequency_features(face_region, size=224)
+            freq_tensor = torch.from_numpy(freq_features).unsqueeze(0).to(DEVICE)  # (1, 2, 224, 224)
+            
+            # Get prediction with both RGB + frequency inputs
             with torch.no_grad():
-                logit = model(input_face).squeeze(0)
+                logit = model(input_face, freq_tensor).squeeze(0)
                 output = torch.sigmoid(logit)
                 return output.item()
         except:
@@ -470,6 +447,19 @@ class DeepfakeDetector:
         # Clip to valid range
         return np.clip(fake_prob + adjustment, 0, 1)
     
+    def analyze_frame_forensics(self, frame):
+        """Run frame-level forensic analysis (works on any video content).
+        
+        Uses adaptive scheduling: full analysis every Nth frame, fast otherwise.
+        """
+        if self.frame_count % self.full_forensic_interval == 0:
+            result = self.frame_analyzer.analyze(frame)
+        else:
+            result = self.frame_analyzer.analyze_fast(frame)
+        
+        self.last_frame_forensic_result = result
+        return result
+
     def analyze_face(self, face_region):
         """Layer 1: Enhanced per-frame analysis with TTA and heuristics"""
         try:
@@ -537,44 +527,144 @@ class DeepfakeDetector:
         return frame
     
     def predict(self, frame):
-        """Main prediction function with 3-layer analysis"""
+        """Main prediction function - works with or without faces.
+        
+        Returns:
+            frame: Annotated frame
+            trigger_forensic: Whether to trigger deep forensic analysis
+            forensic_frame: Frame for forensic analysis
+            result_data: dict with all detection metadata
+        """
         self.frame_count += 1
+        
+        # Always run frame-level forensics (lightweight)
+        frame_forensic = self.analyze_frame_forensics(frame)
         
         # Detect faces
         faces = detect_bounding_box(frame)
         
         trigger_forensic = False
         forensic_frame = None
+        face_results = []
         
-        for (x, y, w, h) in faces:
-            face_region = frame[y:y + h, x:x + w]
+        if len(faces) > 0:
+            # --- Face(s) detected: combine face model + frame forensics ---
+            for (x, y, w, h) in faces:
+                face_region = frame[y:y + h, x:x + w]
+                
+                # Layer 1: Per-frame face analysis
+                fake_prob, real_score, gradcam = self.analyze_face(face_region)
+                
+                if fake_prob is None:
+                    continue
+                
+                # Combine face model (70%) with frame forensics (30%)
+                frame_forensic_prob = frame_forensic['fake_probability']
+                combined_prob = 0.70 * fake_prob + 0.30 * frame_forensic_prob
+                
+                # Layer 2: Update temporal tracker with combined score
+                self.temporal_tracker.update(combined_prob)
+                confidence_level = self.temporal_tracker.get_confidence_level()
+                
+                # Check if we should trigger deeper analysis
+                if self.temporal_tracker.should_trigger_forensic_analysis():
+                    trigger_forensic = True
+                    forensic_frame = frame.copy()
+                
+                # Draw overlay
+                frame = self.draw_detection_overlay(frame, x, y, w, h, combined_prob, confidence_level)
+                
+                face_results.append({
+                    'face_prob': float(fake_prob),
+                    'combined_prob': float(combined_prob),
+                    'bbox': {'x': int(x), 'y': int(y), 'w': int(w), 'h': int(h)}
+                })
+                
+                # Print detailed info every 10 frames
+                if self.frame_count % 10 == 0:
+                    voting_stats = self.temporal_tracker.get_voting_stats()
+                    print(f"Frame {self.frame_count} | Face: {fake_prob*100:.0f}% | "
+                          f"Frame: {frame_forensic_prob*100:.0f}% | "
+                          f"Combined: {combined_prob*100:.0f}% | "
+                          f"Verdict: {confidence_level} | "
+                          f"Votes [F:{voting_stats['fake_count']} R:{voting_stats['real_count']}]")
+        else:
+            # --- No faces detected: use frame forensics only ---
+            frame_fake_prob = frame_forensic['fake_probability']
             
-            # Layer 1: Per-frame analysis
-            fake_prob, real_score, gradcam = self.analyze_face(face_region)
-            
-            if fake_prob is None:
-                continue
-            
-            # Layer 2: Update temporal tracker
-            self.temporal_tracker.update(fake_prob)
+            # Update temporal tracker with frame forensic score
+            self.temporal_tracker.update(frame_fake_prob)
             confidence_level = self.temporal_tracker.get_confidence_level()
             
-            # Check if we should trigger Layer 3
             if self.temporal_tracker.should_trigger_forensic_analysis():
                 trigger_forensic = True
                 forensic_frame = frame.copy()
             
-            # Draw overlay
-            frame = self.draw_detection_overlay(frame, x, y, w, h, fake_prob, confidence_level)
+            # Draw frame-level overlay (no bounding box, just status text)
+            frame = self._draw_frame_analysis_overlay(frame, frame_fake_prob, confidence_level, frame_forensic)
             
-            # Print detailed info every 10 frames
             if self.frame_count % 10 == 0:
-                voting_stats = self.temporal_tracker.get_voting_stats()
-                print(f"Frame {self.frame_count} | This Frame: {fake_prob*100:.0f}% | "
+                scores = frame_forensic.get('scores', {})
+                print(f"Frame {self.frame_count} [NO FACE] | "
+                      f"Forensic: {frame_fake_prob*100:.0f}% | "
                       f"Verdict: {confidence_level} | "
-                      f"Votes [F:{voting_stats['fake_count']} R:{voting_stats['real_count']}]")
+                      f"FFT: {scores.get('frequency', 0)*100:.0f}% "
+                      f"Noise: {scores.get('noise', 0)*100:.0f}% "
+                      f"ELA: {scores.get('ela', 0)*100:.0f}%")
         
-        return frame, trigger_forensic, forensic_frame
+        # Build result metadata
+        result_data = {
+            'frame_count': self.frame_count,
+            'faces_detected': len(faces),
+            'face_results': face_results,
+            'frame_forensic': frame_forensic,
+            'confidence_level': confidence_level if faces or self.frame_count > 1 else 'UNCERTAIN',
+            'temporal_average': float(self.temporal_tracker.get_temporal_average()),
+            'stability_score': float(self.temporal_tracker.get_stability_score()),
+            'analysis_mode': 'face+frame' if len(faces) > 0 else 'frame_only',
+        }
+        
+        return frame, trigger_forensic, forensic_frame, result_data
+
+    def _draw_frame_analysis_overlay(self, frame, fake_prob, confidence_level, forensic_result):
+        """Draw overlay for frame-level analysis (when no faces detected)."""
+        h, w = frame.shape[:2]
+        
+        # Choose color based on verdict
+        if confidence_level == 'FAKE':
+            color = (0, 0, 255)   # Red
+            label = f"SUSPICIOUS ({fake_prob*100:.0f}%)"
+        elif confidence_level == 'REAL':
+            color = (0, 255, 0)   # Green
+            label = f"AUTHENTIC ({(1-fake_prob)*100:.0f}%)"
+        else:
+            color = (0, 200, 255) # Yellow
+            label = f"ANALYZING ({fake_prob*100:.0f}%)"
+        
+        # Draw thin border
+        cv2.rectangle(frame, (2, 2), (w - 2, h - 2), color, 2)
+        
+        # Draw status bar at top
+        bar_h = 30
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (w, bar_h), color, -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        cv2.putText(frame, f"[Frame Analysis] {label}", (10, 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Show signal breakdown at bottom
+        scores = forensic_result.get('scores', {})
+        y_pos = h - 15
+        signals = [f"FFT:{scores.get('frequency',0)*100:.0f}",
+                   f"Noise:{scores.get('noise',0)*100:.0f}",
+                   f"ELA:{scores.get('ela',0)*100:.0f}",
+                   f"Edge:{scores.get('edge',0)*100:.0f}"]
+        signal_text = " | ".join(signals)
+        cv2.putText(frame, signal_text, (10, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
+        
+        return frame
 
 
 # Global detector instance with enhanced features
@@ -586,7 +676,7 @@ detector = DeepfakeDetector(
 
 def predict(frame):
     """Legacy function for backward compatibility"""
-    result_frame, _, _ = detector.predict(frame)
+    result_frame, _, _, _ = detector.predict(frame)
     return result_frame
 
 

@@ -91,6 +91,21 @@
   color: #000000;
 }
 
+.status-badge.error {
+  background: #fff3e0;
+  border: 1px solid #ff9800;
+}
+
+.status-badge.error .status-icon {
+  color: #ff9800;
+  animation: pulse 1s infinite;
+}
+
+.result-item .value.error {
+  color: #ff9800;
+  font-weight: 700;
+}
+
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -129,6 +144,67 @@
 
 .result-item .value.uncertain {
   color: #757575;
+}
+
+.result-item .value.frame-mode {
+  color: #3498db;
+  font-size: 12px;
+}
+
+.result-item .value.face-mode {
+  color: #2ecc71;
+  font-size: 12px;
+}
+
+/* Forensic signals section */
+.forensic-section {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.forensic-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.forensic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+}
+
+.forensic-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.forensic-label {
+  font-size: 10px;
+  color: #777;
+  width: 48px;
+  flex-shrink: 0;
+}
+
+.forensic-bar {
+  flex: 1;
+  height: 6px;
+  background: #e8e8e8;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.forensic-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+  background-color: #2ecc71;
 }
 
 .overlay-footer {

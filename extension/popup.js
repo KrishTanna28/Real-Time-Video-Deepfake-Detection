@@ -14,6 +14,8 @@ const temporalProgress = document.getElementById('temporalProgress');
 const stabilityScoreEl = document.getElementById('stabilityScore');
 const stabilityProgress = document.getElementById('stabilityProgress');
 const framesAnalyzedEl = document.getElementById('framesAnalyzed');
+const analysisModeEl = document.getElementById('analysisMode');
+const processingSpeedEl = document.getElementById('processingSpeed');
 const backendUrlInput = document.getElementById('backendUrl');
 const captureIntervalInput = document.getElementById('captureInterval');
 const testConnectionBtn = document.getElementById('testConnection');
@@ -180,6 +182,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 function updateResults(data) {
   if (!data) return;
 
+  // Update analysis mode
+  if (data.analysis_mode) {
+    const modeLabels = { 'face+frame': 'Face + Frame', 'frame_only': 'Frame Only' };
+    analysisModeEl.textContent = modeLabels[data.analysis_mode] || data.analysis_mode;
+  }
+
   // Update classification
   const classification = data.confidence_level || 'UNCERTAIN';
   classificationEl.textContent = classification;
@@ -204,6 +212,11 @@ function updateResults(data) {
     framesAnalyzedEl.textContent = data.frame_count;
   }
 
+  // Update processing speed
+  if (data.processing_time_ms !== undefined) {
+    processingSpeedEl.textContent = data.processing_time_ms + 'ms';
+  }
+
   // Update status based on classification
   if (classification === 'FAKE' || classification === 'HIGH_FAKE') {
     statusDot.className = 'status-dot alert';
@@ -217,8 +230,11 @@ function updateResults(data) {
   }
 }
 
-// Reset results function - clears the fake probability window
+// Reset results function - clears all display values
 function resetResults() {
+  // Reset analysis mode
+  analysisModeEl.textContent = '-';
+
   // Reset classification
   classificationEl.textContent = 'N/A';
   classificationEl.className = 'result-value';
@@ -236,6 +252,9 @@ function resetResults() {
 
   // Reset frames analyzed
   framesAnalyzedEl.textContent = '0';
+
+  // Reset processing speed
+  processingSpeedEl.textContent = '-';
 
   // Reset status
   statusDot.className = 'status-dot';

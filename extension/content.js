@@ -46,9 +46,22 @@ function removeOverlay() {
 async function captureTab() {
   return new Promise((resolve, reject) => {
     try {
-      // Find video element on the page
-      const video = document.querySelector('video');
+      // Find video element on the page (try multiple selectors)
+      let video = document.querySelector('video');
       
+      // Also check for video inside iframes (e.g., embedded players)
+      if (!video) {
+        const iframes = document.querySelectorAll('iframe');
+        for (const iframe of iframes) {
+          try {
+            video = iframe.contentDocument?.querySelector('video');
+            if (video) break;
+          } catch (e) {
+            // Cross-origin iframe, skip
+          }
+        }
+      }
+
       if (!video) {
         reject(new Error('No video found on page'));
         return;
@@ -60,21 +73,40 @@ async function captureTab() {
         return;
       }
 
+      // Check if video is paused or ended
+      if (video.paused || video.ended) {
+        reject(new Error('Video is paused or ended'));
+        return;
+      }
+
       // Create canvas to capture video frame
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
       
+      // Use video dimensions, with fallback and cap for performance
+      let vw = video.videoWidth || 640;
+      let vh = video.videoHeight || 480;
+      
+      // Cap resolution for faster processing (maintain aspect ratio)
+      const maxDim = 720;
+      if (vw > maxDim || vh > maxDim) {
+        const scale = maxDim / Math.max(vw, vh);
+        vw = Math.round(vw * scale);
+        vh = Math.round(vh * scale);
+      }
+      
+      canvas.width = vw;
+      canvas.height = vh;
+
       if (canvas.width === 0 || canvas.height === 0) {
         reject(new Error('Video has no dimensions'));
         return;
       }
-      
+
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Convert to data URL
-      const dataUrl = canvas.toDataURL('image/png');
+
+      // Convert to JPEG for smaller payload (faster transfer)
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
       resolve(dataUrl);
     } catch (error) {
       reject(error);
@@ -82,27 +114,29 @@ async function captureTab() {
   });
 }
 
-// Send frame to backend for analysis
+// Send frame to backend for analysis via background service worker
+// (Content scripts can't fetch localhost due to page CSP restrictions)
 async function analyzeFrame(imageDataUrl) {
-  try {
-    console.log('Sending frame to background script for analysis...');
-
-    // Send to background script to forward to backend
-    const result = await chrome.runtime.sendMessage({
-      action: 'analyzeFrame',
-      imageData: imageDataUrl
-    });
-
-    if (result.error) {
-      throw new Error(result.error);
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.runtime.sendMessage({
+        action: 'analyzeFrame',
+        imageData: imageDataUrl
+      }, (result) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (result && result.error) {
+          reject(new Error(result.error));
+          return;
+        }
+        resolve(result);
+      });
+    } catch (error) {
+      reject(error);
     }
-
-    console.log('Analysis result:', result);
-    return result;
-  } catch (error) {
-    console.error('Error analyzing frame:', error);
-    throw error;
-  }
+  });
 }
 
 // Start capturing and analyzing
@@ -128,6 +162,9 @@ async function startDetection(interval = 1000) {
       // Analyze frame
       const result = await analyzeFrame(imageDataUrl);
 
+      // Log results for debugging
+      console.log('Analysis result:', JSON.stringify(result, null, 2));
+
       // Update overlay with results
       updateOverlay(result);
 
@@ -143,6 +180,12 @@ async function startDetection(interval = 1000) {
 
     } catch (error) {
       console.error('Detection error:', error);
+      
+      // Update overlay with error/disconnected state so it doesn't show stale "REAL" data
+      updateOverlay({ 
+        status: 'error',
+        error_message: error.message 
+      });
       
       // Send error to popup (ignore if popup is closed)
       try {
@@ -166,14 +209,15 @@ async function stopDetection() {
   state.isCapturing = false;
   removeOverlay();
 
-  // Reset backend detector state
+  // Reset backend detector state via background service worker
   try {
-    const backendUrl = 'http://localhost:5000';
-    await fetch(`${backendUrl}/reset`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+    chrome.runtime.sendMessage({ action: 'resetBackend' }, () => {
+      if (chrome.runtime.lastError) {
+        console.log('Could not reset backend:', chrome.runtime.lastError.message);
+      } else {
+        console.log('Backend detector reset');
+      }
     });
-    console.log('Backend detector reset');
   } catch (error) {
     console.log('Could not reset backend:', error);
   }
