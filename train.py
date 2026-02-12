@@ -166,8 +166,24 @@ VAL_SPLIT = 0.15
 
 def preextract_faces(output_dir, frames_per_video=15):
     output_dir = Path(output_dir)
-    train_real = output_dir / "train" / "real"
-    if train_real.exists() and len(list(train_real.glob("*.jpg"))) > 100:
+    # Only skip if ALL four subdirectories have images (prevents partial extraction)
+    dirs_to_check = [
+        output_dir / "train" / "real",
+        output_dir / "train" / "fake",
+        output_dir / "val" / "real",
+        output_dir / "val" / "fake",
+    ]
+    counts = {}
+    all_populated = True
+    for d in dirs_to_check:
+        if d.exists():
+            counts[d.name + "_" + d.parent.name] = len(list(d.glob("*.jpg")))
+        else:
+            counts[d.name + "_" + d.parent.name] = 0
+        if counts[d.name + "_" + d.parent.name] < 10:
+            all_populated = False
+
+    if all_populated:
         real_count = len(list((output_dir / "train" / "real").glob("*.jpg"))) + \
                      len(list((output_dir / "val" / "real").glob("*.jpg")))
         fake_count = len(list((output_dir / "train" / "fake").glob("*.jpg"))) + \
@@ -175,6 +191,11 @@ def preextract_faces(output_dir, frames_per_video=15):
         print(f"  Face crops already extracted ({real_count} real, {fake_count} fake)")
         print(f"  Delete '{output_dir}' to re-extract\n")
         return
+    elif any(v > 0 for v in counts.values()):
+        print(f"  Incomplete extraction detected — re-extracting from scratch...")
+        import shutil
+        if output_dir.exists():
+            shutil.rmtree(output_dir)
 
     print("=" * 60)
     print("  Phase 1: Extracting face crops from FF++ videos")
@@ -208,8 +229,8 @@ def preextract_faces(output_dir, frames_per_video=15):
     n_val_real = max(1, int(len(real_vids) * VAL_SPLIT))
     n_val_fake = max(1, int(len(fake_vids) * VAL_SPLIT))
     splits = {
-        "val": real_vids[:n_val_real] + fake_vids[:n_val_fake],
         "train": real_vids[n_val_real:] + fake_vids[n_val_fake:],
+        "val": real_vids[:n_val_real] + fake_vids[:n_val_fake],
     }
     print(f"  Train: {len(splits['train'])} videos | Val: {len(splits['val'])} videos")
 
@@ -431,7 +452,13 @@ class DeepfakeDataset(Dataset):
 # =============================================================================
 def make_balanced_sampler(dataset):
     labels = np.array(dataset.labels)
-    class_counts = np.bincount(labels)
+    class_counts = np.bincount(labels, minlength=2)
+    if class_counts[0] == 0 or class_counts[1] == 0:
+        missing = "fake" if class_counts[1] == 0 else "real"
+        raise RuntimeError(
+            f"Training set has 0 {missing} samples! "
+            f"Delete 'dataset/ff_face_crops' and re-run to fix extraction."
+        )
     weights_per_class = 1.0 / class_counts
     sample_weights = weights_per_class[labels]
     sampler = WeightedRandomSampler(
@@ -623,7 +650,7 @@ def load_checkpoint(path, model, optimizer, scheduler, scaler, ema):
         return None
 
     print(f"\n  Loading checkpoint from {path}...")
-    state = torch.load(str(path), map_location=DEVICE)
+    state = torch.load(str(path), map_location=DEVICE, weights_only=False)
 
     model.load_state_dict(state['model_state_dict'])
     optimizer.load_state_dict(state['optimizer_state_dict'])
@@ -727,7 +754,7 @@ def main(args):
     pretrained_path = Path("weights/best_model.pth")
     if not args.fresh and pretrained_path.exists() and not RESUME_CHECKPOINT.exists():
         print(f"  Loading pre-trained weights from {pretrained_path}...")
-        checkpoint = torch.load(str(pretrained_path), map_location=DEVICE)
+        checkpoint = torch.load(str(pretrained_path), map_location=DEVICE, weights_only=False)
         if 'model_state_dict' in checkpoint:
             missing, unexpected = model.load_state_dict(
                 checkpoint['model_state_dict'], strict=False

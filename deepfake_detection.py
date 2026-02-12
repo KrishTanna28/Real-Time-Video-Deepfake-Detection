@@ -41,7 +41,7 @@ for weights_path in weights_paths:
     if os.path.exists(weights_path):
         print(f"Loading trained weights from {weights_path}")
         try:
-            checkpoint = torch.load(weights_path, map_location=DEVICE)
+            checkpoint = torch.load(weights_path, map_location=DEVICE, weights_only=False)
             if "model_state_dict" in checkpoint:
                 state_dict = checkpoint["model_state_dict"]
             else:
@@ -83,7 +83,7 @@ else:
     print("\n✅ TRAINED MODEL LOADED - Ready for detection!")
     print("   - Model: EfficientNet-B0 (trained on deepfake dataset)")
     print("   - Architecture: 1280-dim features → 512 → 256 → 1")
-    print("   - Detection threshold: 0.5")
+    print("   - Detection threshold: 0.55")
     print("   - Weighting: 70% face model + 30% frame forensics\n")
 
 model.to(DEVICE)
@@ -96,13 +96,13 @@ class TemporalTracker:
     Tracks predictions across frames with voting-based classification
     """
     
-    def __init__(self, window_size=60, high_confidence_threshold=0.75, voting_window=10, detection_threshold=0.5):
+    def __init__(self, window_size=60, high_confidence_threshold=0.75, voting_window=10, detection_threshold=0.55):
         """
         Args:
             window_size: Number of frames to track (60 frames ~ 2 seconds at 30fps)
             high_confidence_threshold: Threshold for high confidence detection
             voting_window: Number of frames to collect before updating verdict (default: 10)
-            detection_threshold: Threshold for classifying frame as FAKE vs REAL (default: 0.5)
+            detection_threshold: Threshold for classifying frame as FAKE vs REAL (default: 0.55)
         """
         self.window_size = window_size
         self.high_confidence_threshold = high_confidence_threshold
@@ -289,7 +289,7 @@ class DeepfakeDetector:
     """
     
     def __init__(self, enable_gradcam=False, use_tta=True, num_tta_augmentations=3,
-                 detection_threshold=0.5, face_weight=0.70, forensic_weight=0.30):
+                 detection_threshold=0.55, face_weight=0.70, forensic_weight=0.30):
         """
         Args:
             enable_gradcam: Enable GradCAM visualization (slow)
