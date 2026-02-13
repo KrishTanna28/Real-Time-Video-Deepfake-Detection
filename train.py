@@ -6,14 +6,16 @@ Features:
     resume exactly where you left off. Saves every epoch + writes a resume
     checkpoint that stores epoch, optimizer, scheduler, scaler, best metrics,
     and RNG states so training is 100% resumable.
-  - REGULARIZATION: Label smoothing, Mixup, CutMix, stochastic weight
-    averaging (SWA), gradient clipping, weight decay.
+  - ANTI-OVERFITTING: Focal Loss (hard-example mining + class reweighting),
+    backbone partial freezing (60% of EfficientNet blocks), downsampled
+    balanced epochs, label smoothing, Mixup, CutMix, strong augmentation.
   - OPTIMIZATION: OneCycleLR with warmup, gradient accumulation for larger
     effective batch size, EMA (exponential moving average) model, early
     stopping with patience.
-  - BALANCED SAMPLING: WeightedRandomSampler to handle 6:1 FAKE:REAL imbalance.
-  - AUGMENTATIONS: JPEG compression, color jitter, random erasing, flip,
-    rotation, grayscale.
+  - BALANCED SAMPLING: Downsampled WeightedRandomSampler — epochs use
+    2×minority_class samples instead of full dataset to prevent memorization.
+  - AUGMENTATIONS: JPEG compression, Gaussian noise/blur, perspective warp,
+    color jitter, random erasing, flip, rotation, grayscale.
 
 Usage:
     # Start training (auto-resumes if checkpoint exists):
@@ -333,7 +335,45 @@ def mixup_criterion(criterion, pred, y_a, y_b, lam):
 
 
 # =============================================================================
-# 5. EMA (Exponential Moving Average) Model
+# 5. Focal Loss (class imbalance + hard-example mining)
+# =============================================================================
+class FocalLoss(nn.Module):
+    """Focal Loss for imbalanced binary classification.
+
+    Down-weights well-classified (easy) examples so the model focuses on
+    hard-to-classify samples. Especially effective for class imbalance.
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    Args:
+        gamma: Focusing parameter. 0 = standard BCE, 2 = recommended.
+        alpha: Weight for positive class (fake). 0.25 means real class
+               gets 3x more weight, compensating for majority fake class.
+        label_smoothing: Smooth hard 0/1 labels to prevent overconfidence.
+    """
+    def __init__(self, gamma=2.0, alpha=0.25, label_smoothing=0.0):
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.label_smoothing = label_smoothing
+
+    def forward(self, logits, targets):
+        # Apply label smoothing: 0 -> ls/2, 1 -> 1 - ls/2
+        if self.label_smoothing > 0:
+            targets = targets * (1 - self.label_smoothing) + 0.5 * self.label_smoothing
+
+        bce = F.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+        probs = torch.sigmoid(logits)
+        # p_t = probability of the correct class
+        p_t = probs * targets + (1 - probs) * (1 - targets)
+        # alpha_t = class weight (lower for majority fake class)
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        focal_weight = alpha_t * (1 - p_t) ** self.gamma
+        return (focal_weight * bce).mean()
+
+
+# =============================================================================
+# 6. EMA (Exponential Moving Average) Model
 # =============================================================================
 class EMAModel:
     """Maintains an exponential moving average of model parameters.
@@ -408,18 +448,24 @@ class DeepfakeDataset(Dataset):
 
         if split == 'train':
             self.transform = transforms.Compose([
-                transforms.Resize((image_size + 16, image_size + 16)),
+                transforms.Resize((image_size + 20, image_size + 20)),
                 transforms.RandomCrop((image_size, image_size)),
                 transforms.RandomHorizontalFlip(p=0.5),
-                transforms.ColorJitter(brightness=0.25, contrast=0.25,
-                                       saturation=0.2, hue=0.05),
-                transforms.RandomGrayscale(p=0.05),
-                transforms.RandomRotation(degrees=10),
-                transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
+                transforms.ColorJitter(brightness=0.3, contrast=0.3,
+                                       saturation=0.25, hue=0.08),
+                transforms.RandomGrayscale(p=0.08),
+                transforms.RandomRotation(degrees=15),
+                transforms.RandomAffine(degrees=0, translate=(0.08, 0.08),
+                                        scale=(0.9, 1.1)),
+                transforms.RandomPerspective(distortion_scale=0.15, p=0.3),
+                transforms.RandomApply(
+                    [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5))],
+                    p=0.2
+                ),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225]),
-                transforms.RandomErasing(p=0.15, scale=(0.02, 0.15)),
+                transforms.RandomErasing(p=0.25, scale=(0.02, 0.2)),
             ])
         else:
             self.transform = transforms.Compose([
@@ -461,11 +507,16 @@ def make_balanced_sampler(dataset):
         )
     weights_per_class = 1.0 / class_counts
     sample_weights = weights_per_class[labels]
+    # Downsample to 2x minority class per epoch instead of full dataset.
+    # With num_samples=len(dataset), minority real images repeat ~6x/epoch
+    # causing memorization. This way each real image appears ~once/epoch.
+    n_minority = int(min(class_counts))
+    num_samples = 2 * n_minority
     sampler = WeightedRandomSampler(
-        weights=sample_weights, num_samples=len(dataset), replacement=True
+        weights=sample_weights, num_samples=num_samples, replacement=True
     )
-    print(f"  Balanced sampler: real weight={weights_per_class[0]:.6f}, "
-          f"fake weight={weights_per_class[1]:.6f}")
+    print(f"  Balanced sampler: {num_samples} samples/epoch "
+          f"({n_minority} per class, downsampled from {len(dataset)})")
     return sampler
 
 
@@ -712,6 +763,7 @@ def main(args):
     print(f"  Label smoothing:    {args.label_smoothing}")
     print(f"  Mixup alpha:        {args.mixup_alpha}")
     print(f"  CutMix alpha:       {args.cutmix_alpha}")
+    print(f"  Focal Loss:         gamma={args.focal_gamma}, alpha={args.focal_alpha}")
     print(f"  EMA decay:          {args.ema_decay}")
     print(f"  Grad accumulation:  {args.grad_accum}")
     print(f"  Early stop patience:{args.patience}")
@@ -768,38 +820,54 @@ def main(args):
 
     model.to(DEVICE)
 
+    # Freeze early backbone layers to prevent overfitting on limited data
+    # EfficientNet-B0 has 16 MBConv blocks; freeze first 60% + stem
+    if hasattr(model.net, '_blocks'):
+        n_blocks = len(model.net._blocks)
+        n_freeze = int(n_blocks * 0.6)  # freeze ~10 of 16 blocks
+        for block in model.net._blocks[:n_freeze]:
+            for param in block.parameters():
+                param.requires_grad = False
+        # Also freeze stem (initial convolution + batchnorm)
+        for param in model.net._conv_stem.parameters():
+            param.requires_grad = False
+        for param in model.net._bn0.parameters():
+            param.requires_grad = False
+        print(f"  Backbone: frozen first {n_freeze}/{n_blocks} blocks + stem")
+
     total_params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"  Parameters: {total_params:,} total, {trainable:,} trainable\n")
 
-    # ---- Phase 4: Loss with Label Smoothing ----
-    criterion = nn.BCEWithLogitsLoss(
-        label_smoothing=args.label_smoothing
-    ) if hasattr(nn.BCEWithLogitsLoss, 'label_smoothing') else None
+    # ---- Phase 4: Focal Loss (handles class imbalance + hard examples) ----
+    # Replaces BCE: down-weights easy majority-class examples (gamma=2),
+    # upweights minority real class (alpha=0.25 → real gets 3x weight)
+    criterion = FocalLoss(
+        gamma=args.focal_gamma,
+        alpha=args.focal_alpha,
+        label_smoothing=args.label_smoothing,
+    )
 
-    # BCEWithLogitsLoss doesn't have label_smoothing — implement manually
-    if criterion is None:
-        base_criterion = nn.BCEWithLogitsLoss()
-        ls = args.label_smoothing
-
-        def criterion(logits, targets):
-            if ls > 0:
-                targets = targets * (1 - ls) + 0.5 * ls
-            return base_criterion(logits, targets)
-
-    # ---- Optimizer with differential LR ----
+    # ---- Optimizer with differential LR (skip frozen params) ----
     backbone_params = []
     classifier_params = []
     for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue  # Skip frozen backbone layers
         if 'net._fc' in name:
             classifier_params.append(param)
         else:
             backbone_params.append(param)
 
-    optimizer = torch.optim.AdamW([
-        {'params': backbone_params, 'lr': args.lr * 0.1},
-        {'params': classifier_params, 'lr': args.lr},
-    ], weight_decay=args.weight_decay)
+    param_groups = []
+    max_lrs = []
+    if backbone_params:
+        param_groups.append({'params': backbone_params, 'lr': args.lr * 0.1})
+        max_lrs.append(args.lr * 0.1)
+    param_groups.append({'params': classifier_params, 'lr': args.lr})
+    max_lrs.append(args.lr)
+
+    optimizer = torch.optim.AdamW(param_groups, weight_decay=args.weight_decay)
 
     # ---- OneCycleLR Scheduler (with warmup built-in) ----
     steps_per_epoch = len(train_loader) // args.grad_accum
@@ -807,7 +875,7 @@ def main(args):
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
-        max_lr=[args.lr * 0.1, args.lr],
+        max_lr=max_lrs,
         total_steps=total_steps,
         pct_start=0.1,       # 10% warmup
         anneal_strategy='cos',
@@ -941,6 +1009,8 @@ def main(args):
                     'mixup_alpha': args.mixup_alpha,
                     'cutmix_alpha': args.cutmix_alpha,
                     'ema_decay': args.ema_decay,
+                    'focal_gamma': args.focal_gamma,
+                    'focal_alpha': args.focal_alpha,
                 }
             }, str(BEST_MODEL_PATH))
 
@@ -988,7 +1058,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=3e-4,
                         help='Max LR for classifier (backbone gets 0.1x)')
-    parser.add_argument('--weight_decay', type=float, default=0.02)
+    parser.add_argument('--weight_decay', type=float, default=0.05)
     parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--frames_per_video', type=int, default=15)
@@ -1000,13 +1070,17 @@ if __name__ == '__main__':
                         help='Mixup alpha (0=off)')
     parser.add_argument('--cutmix_alpha', type=float, default=0.3,
                         help='CutMix alpha (0=off)')
+    parser.add_argument('--focal_gamma', type=float, default=2.0,
+                        help='Focal loss gamma (0=BCE, 2=recommended for imbalance)')
+    parser.add_argument('--focal_alpha', type=float, default=0.25,
+                        help='Focal loss alpha for positive/fake class (lower=more weight on real)')
 
     # Optimization
     parser.add_argument('--ema_decay', type=float, default=0.999,
                         help='EMA decay (0=off, 0.999=recommended)')
     parser.add_argument('--grad_accum', type=int, default=2,
                         help='Gradient accumulation steps (effective batch = batch * accum)')
-    parser.add_argument('--patience', type=int, default=7,
+    parser.add_argument('--patience', type=int, default=5,
                         help='Early stopping patience (epochs without improvement)')
 
     # Resume / Fresh
