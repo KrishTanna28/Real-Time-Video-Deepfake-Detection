@@ -54,7 +54,7 @@ CORS(app, resources={
 
 # Initialize detector
 print("Initializing detector...")
-detector = DeepfakeDetector(enable_gradcam=False, use_tta=False, num_tta_augmentations=1)
+detector = DeepfakeDetector(enable_gradcam=False, use_tta=False, num_tta_augmentations=1, detection_threshold=0.55)
 print("Detector initialized!")
 print("=" * 60)
 
@@ -192,14 +192,6 @@ def analyze_frame():
                         'x': int(x), 'y': int(y),
                         'width': int(w), 'height': int(h)
                     },
-                    'forensic_signals': {
-                        'frequency': float(frame_forensic_scores.get('frequency', 0)),
-                        'noise': float(frame_forensic_scores.get('noise', 0)),
-                        'ela': float(frame_forensic_scores.get('ela', 0)),
-                        'edge': float(frame_forensic_scores.get('edge', 0)),
-                        'color': float(frame_forensic_scores.get('color', 0)),
-                        'temporal': float(frame_forensic_scores.get('temporal', 0)),
-                    }
                 }
 
                 logger.info(
@@ -230,14 +222,6 @@ def analyze_frame():
             'stability_score': float(stability),
             'frame_count': detector.frame_count,
             'processing_time_ms': round(processing_time, 1),
-            'forensic_signals': {
-                'frequency': float(frame_forensic_scores.get('frequency', 0)),
-                'noise': float(frame_forensic_scores.get('noise', 0)),
-                'ela': float(frame_forensic_scores.get('ela', 0)),
-                'edge': float(frame_forensic_scores.get('edge', 0)),
-                'color': float(frame_forensic_scores.get('color', 0)),
-                'temporal': float(frame_forensic_scores.get('temporal', 0)),
-            }
         }
 
         logger.info(

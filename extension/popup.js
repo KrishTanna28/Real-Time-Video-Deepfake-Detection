@@ -190,8 +190,13 @@ function updateResults(data) {
 
   // Update classification
   const classification = data.confidence_level || 'UNCERTAIN';
-  classificationEl.textContent = classification;
-  classificationEl.className = 'result-value ' + classification.toLowerCase().replace('_', '-');
+  if (classification === 'UNCERTAIN') {
+    classificationEl.textContent = 'ANALYZING';
+    classificationEl.className = 'result-value';
+  } else {
+    classificationEl.textContent = classification;
+    classificationEl.className = 'result-value ' + classification.toLowerCase().replace('_', '-');
+  }
 
   // Update confidence
   const confidence = (data.fake_probability * 100).toFixed(1);
@@ -218,7 +223,10 @@ function updateResults(data) {
   }
 
   // Update status based on classification
-  if (classification === 'FAKE' || classification === 'HIGH_FAKE') {
+  if (classification === 'UNCERTAIN') {
+    statusDot.className = 'status-dot analyzing';
+    statusText.textContent = 'Analyzing...';
+  } else if (classification === 'FAKE' || classification === 'HIGH_FAKE') {
     statusDot.className = 'status-dot alert';
     statusText.textContent = 'Deepfake Detected!';
   } else if (classification === 'REAL' || classification === 'HIGH_REAL') {
@@ -236,7 +244,7 @@ function resetResults() {
   analysisModeEl.textContent = '-';
 
   // Reset classification
-  classificationEl.textContent = 'N/A';
+  classificationEl.textContent = 'ANALYZING';
   classificationEl.className = 'result-value';
 
   // Reset confidence

@@ -156,55 +156,82 @@
   font-size: 12px;
 }
 
-/* Forensic signals section */
-.forensic-section {
+/* Detection reasons section */
+.reasons-section {
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid #e0e0e0;
 }
 
-.forensic-title {
+.reasons-title {
   font-size: 11px;
   font-weight: 600;
   color: #555;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-.forensic-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 12px;
-}
-
-.forensic-item {
+.reasons-list {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 6px;
 }
 
-.forensic-label {
-  font-size: 10px;
-  color: #777;
-  width: 48px;
+.reason-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-left: 3px solid #ccc;
+  background: #fafafa;
+  transition: background 0.2s;
+}
+
+.reason-card.severity-high {
+  border-left-color: #e74c3c;
+  background: #fff5f5;
+}
+
+.reason-card.severity-medium {
+  border-left-color: #f39c12;
+  background: #fffcf0;
+}
+
+.reason-card.severity-safe {
+  border-left-color: #27ae60;
+  background: #f0faf4;
+}
+
+.reason-card.severity-neutral {
+  border-left-color: #95a5a6;
+  background: #f8f9fa;
+}
+
+.reason-icon {
+  font-size: 18px;
   flex-shrink: 0;
+  line-height: 1.2;
 }
 
-.forensic-bar {
+.reason-body {
   flex: 1;
-  height: 6px;
-  background: #e8e8e8;
-  border-radius: 3px;
-  overflow: hidden;
+  min-width: 0;
 }
 
-.forensic-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: 3px;
-  transition: width 0.3s ease, background-color 0.3s ease;
-  background-color: #2ecc71;
+.reason-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #222;
+  line-height: 1.3;
+}
+
+.reason-detail {
+  font-size: 11px;
+  color: #666;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
 .overlay-footer {
