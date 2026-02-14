@@ -151,6 +151,22 @@ async function startDetection(interval = 1000) {
     resetOverlay(); // Reset overlay to clear old fake probability window
   }, 100);
 
+  // Reset backend state so we start completely fresh (no previous verdict)
+  try {
+    await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'resetBackend' }, () => {
+        if (chrome.runtime.lastError) {
+          console.log('Could not reset backend on start:', chrome.runtime.lastError.message);
+        } else {
+          console.log('Backend detector reset on start');
+        }
+        resolve();
+      });
+    });
+  } catch (e) {
+    console.log('Could not reset backend on start:', e);
+  }
+
   // Update overlay with initial status
   updateOverlay({ status: 'analyzing' });
 
@@ -181,11 +197,16 @@ async function startDetection(interval = 1000) {
     } catch (error) {
       console.error('Detection error:', error);
       
-      // Update overlay with error/disconnected state so it doesn't show stale "REAL" data
+      // Update overlay with error/disconnected state so it doesn't show stale data
       updateOverlay({ 
         status: 'error',
         error_message: error.message 
       });
+
+      // Reset backend so next successful connection starts fresh
+      try {
+        chrome.runtime.sendMessage({ action: 'resetBackend' }, () => {});
+      } catch (e) { /* ignore */ }
       
       // Send error to popup (ignore if popup is closed)
       try {

@@ -96,7 +96,7 @@ class TemporalTracker:
     Tracks predictions across frames with voting-based classification
     """
     
-    def __init__(self, window_size=60, high_confidence_threshold=0.75, voting_window=10, detection_threshold=0.55):
+    def __init__(self, window_size=60, high_confidence_threshold=0.6, voting_window=10, detection_threshold=0.5):
         """
         Args:
             window_size: Number of frames to track (60 frames ~ 2 seconds at 30fps)
@@ -144,10 +144,19 @@ class TemporalTracker:
         self._update_verdict()
     
     def _update_verdict(self):
-        """Traverse the queue and count majority to update verdict"""
+        """Traverse the queue and count majority to update verdict.
+        
+        Only gives a verdict once the voting window is full (10 frames).
+        Until then, returns UNCERTAIN so the UI shows 'Analyzing...'.
+        """
         if len(self.frame_classifications) == 0:
             # No data yet
             self.current_verdict = None
+            return
+        
+        # Wait until we have enough frames before giving a verdict
+        if len(self.frame_classifications) < self.voting_window:
+            self.current_verdict = None  # Stay UNCERTAIN
             return
         
         # Store previous verdict to detect changes
@@ -289,7 +298,7 @@ class DeepfakeDetector:
     """
     
     def __init__(self, enable_gradcam=False, use_tta=True, num_tta_augmentations=3,
-                 detection_threshold=0.55, face_weight=0.70, forensic_weight=0.30):
+                 detection_threshold=0.5, face_weight=0.70, forensic_weight=0.30):
         """
         Args:
             enable_gradcam: Enable GradCAM visualization (slow)
@@ -308,7 +317,7 @@ class DeepfakeDetector:
         
         self.temporal_tracker = TemporalTracker(
             window_size=60, 
-            high_confidence_threshold=0.75,
+            high_confidence_threshold=0.6,
             voting_window=10,  # Update verdict every 10 frames
             detection_threshold=detection_threshold
         )
