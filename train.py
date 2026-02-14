@@ -228,6 +228,24 @@ def preextract_faces(output_dir, frames_per_video=15):
     random.seed(42)
     random.shuffle(real_vids)
     random.shuffle(fake_vids)
+
+    # =========================================================================
+    # BALANCE FIX: Subsample fake videos to match real count (1:1 ratio)
+    # This prevents the model from being biased toward predicting FAKE.
+    # =========================================================================
+    if len(fake_vids) > len(real_vids):
+        original_fake_count = len(fake_vids)
+        fake_vids = fake_vids[:len(real_vids)]
+        print(f"  ⚖️  BALANCED: Subsampled fake videos {original_fake_count} → {len(fake_vids)} "
+              f"to match {len(real_vids)} real videos (1:1 ratio)")
+    elif len(real_vids) > len(fake_vids):
+        original_real_count = len(real_vids)
+        real_vids = real_vids[:len(fake_vids)]
+        print(f"  ⚖️  BALANCED: Subsampled real videos {original_real_count} → {len(real_vids)} "
+              f"to match {len(fake_vids)} fake videos (1:1 ratio)")
+    else:
+        print(f"  ✓ Dataset already balanced: {len(real_vids)} real = {len(fake_vids)} fake")
+
     n_val_real = max(1, int(len(real_vids) * VAL_SPLIT))
     n_val_fake = max(1, int(len(fake_vids) * VAL_SPLIT))
     splits = {
@@ -235,6 +253,8 @@ def preextract_faces(output_dir, frames_per_video=15):
         "val": real_vids[:n_val_real] + fake_vids[:n_val_fake],
     }
     print(f"  Train: {len(splits['train'])} videos | Val: {len(splits['val'])} videos")
+    print(f"    Train real: {len(real_vids[n_val_real:])} | Train fake: {len(fake_vids[n_val_fake:])}")
+    print(f"    Val real:   {n_val_real} | Val fake:   {n_val_fake}")
 
     total_extracted = {"train": {"real": 0, "fake": 0}, "val": {"real": 0, "fake": 0}}
     for split_name, entries in splits.items():
@@ -754,7 +774,8 @@ def main(args):
     print(f"  Deepfake Detection — FaceForensics++ Training")
     print(f"{'='*60}")
     print(f"  Device:             {DEVICE}")
-    print(f"  Dataset:            {FF_DATASET_DIR}")
+    dataset_label = args.dataset if args.dataset else str(FF_DATASET_DIR)
+    print(f"  Dataset:            {dataset_label}")
     print(f"  Frames per video:   {args.frames_per_video}")
     print(f"  Epochs:             {args.epochs}")
     print(f"  Batch size:         {args.batch_size} "
@@ -772,9 +793,28 @@ def main(args):
     print(f"  Run the same command to resume from where you stopped.")
     print(f"{'='*60}\n")
 
-    # ---- Phase 1: Extract face crops ----
-    face_crops_dir = Path("dataset/ff_face_crops")
-    preextract_faces(face_crops_dir, frames_per_video=args.frames_per_video)
+    # ---- Phase 1: Get face crops (pre-extracted or extract from FF++ videos) ----
+    if args.dataset:
+        face_crops_dir = Path(args.dataset)
+        if not face_crops_dir.exists():
+            print(f"ERROR: Dataset directory not found: {face_crops_dir}")
+            print(f"Run download_dfdc.py first, or check the path.")
+            return
+        # Verify structure
+        for split in ['train', 'val']:
+            for label in ['real', 'fake']:
+                d = face_crops_dir / split / label
+                if not d.exists() or len(list(d.glob('*.jpg'))) == 0:
+                    print(f"ERROR: Missing or empty: {d}")
+                    return
+        print(f"  Using pre-extracted face crops from: {face_crops_dir}")
+        for split in ['train', 'val']:
+            for label in ['real', 'fake']:
+                count = len(list((face_crops_dir / split / label).glob('*.jpg')))
+                print(f"    {split}/{label}: {count:,} images")
+    else:
+        face_crops_dir = Path("dataset/ff_face_crops")
+        preextract_faces(face_crops_dir, frames_per_video=args.frames_per_video)
 
     # ---- Phase 2: Datasets & Loaders ----
     train_dataset = DeepfakeDataset(face_crops_dir, split='train')
@@ -1087,6 +1127,12 @@ if __name__ == '__main__':
     parser.add_argument('--fresh', action='store_true', default=False,
                         help='Start completely fresh (ignore all checkpoints)')
     parser.add_argument('--save_dir', type=str, default='weights')
+
+    # Dataset source
+    parser.add_argument('--dataset', type=str, default=None,
+                        help='Path to pre-extracted face crops dir (e.g. dataset/dfdc_face_crops). '
+                             'If provided, skips FF++ video extraction and uses these directly. '
+                             'Must contain train/real/, train/fake/, val/real/, val/fake/')
 
     args = parser.parse_args()
     main(args)
