@@ -52,29 +52,29 @@ When a user clicks "Start Detection" in the extension popup, the content script 
                            | HTTP POST (localhost:5000/analyze)
                            v
 +----------------------------------------------------------------------+
-|                  FLASK BACKEND SERVER (Python)                        |
+|                  FLASK BACKEND SERVER (Python)                       |
 |                                                                      |
 |  Endpoints: /analyze, /reset, /health, /stats                        |
 |                          |                                           |
 |                          v                                           |
 |  +----------------------------------------------------------------+  |
-|  |                  DEEPFAKE DETECTOR                              |  |
-|  |                                                                 |  |
-|  |  Face Detection          Frame Forensic Analysis                |  |
+|  |                  DEEPFAKE DETECTOR                             |  |
+|  |                                                                |  |
+|  |  Face Detection          Frame Forensic Analysis               |  |
 |  |  (OpenCV DNN SSD         (6 signals: FFT, Noise, ELA,          |  |
-|  |   + Haar fallback)        Edge, Color, Temporal)                |  |
-|  |       |                        |                                |  |
-|  |       v                        |                                |  |
-|  |  Face Analysis                 |                                |  |
-|  |  CLAHE -> MTCNN ->             |                                |  |
-|  |  EfficientNet-B0 ->            |                                |  |
-|  |  sigmoid -> probability        |                                |  |
-|  |       |                        |                                |  |
-|  |       +----------+-------------+                                |  |
-|  |                  |                                               |  |
-|  |                  v                                               |  |
-|  |       Temporal Tracker (Voting System)                          |  |
-|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN         |  |
+|  |   + Haar fallback)        Edge, Color, Temporal)               |  |
+|  |       |                        |                               |  |
+|  |       v                        |                               |  |
+|  |  Face Analysis                 |                               |  |
+|  |  CLAHE -> MTCNN ->             |                               |  |
+|  |  EfficientNet-B0 ->            |                               |  |
+|  |  sigmoid -> probability        |                               |  |
+|  |       |                        |                               |  |
+|  |       +----------+-------------+                               |  |
+|  |                  |                                             |  |
+|  |                  v                                             |  |
+|  |       Temporal Tracker (Voting System)                         |  |
+|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN        |  |
 |  +----------------------------------------------------------------+  |
 +----------------------------------------------------------------------+
 ```
