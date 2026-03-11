@@ -52,29 +52,29 @@ When a user clicks "Start Detection" in the extension popup, the content script 
                            | HTTP POST (localhost:5000/analyze)
                            v
 +----------------------------------------------------------------------+
-|                  FLASK BACKEND SERVER (Python)                       |
+|                  FLASK BACKEND SERVER (Python)                        |
 |                                                                      |
 |  Endpoints: /analyze, /reset, /health, /stats                        |
 |                          |                                           |
 |                          v                                           |
 |  +----------------------------------------------------------------+  |
-|  |                  DEEPFAKE DETECTOR                             |  |
-|  |                                                                |  |
-|  |  Face Detection          Frame Forensic Analysis               |  |
+|  |                  DEEPFAKE DETECTOR                              |  |
+|  |                                                                 |  |
+|  |  Face Detection          Frame Forensic Analysis                |  |
 |  |  (OpenCV DNN SSD         (6 signals: FFT, Noise, ELA,          |  |
-|  |   + Haar fallback)        Edge, Color, Temporal)               |  |
-|  |       |                        |                               |  |
-|  |       v                        |                               |  |
-|  |  Face Analysis                 |                               |  |
-|  |  CLAHE -> MTCNN ->             |                               |  |
-|  |  EfficientNet-B0 ->            |                               |  |
-|  |  sigmoid -> probability        |                               |  |
-|  |       |                        |                               |  |
-|  |       +----------+-------------+                               |  |
-|  |                  |                                             |  |
-|  |                  v                                             |  |
-|  |       Temporal Tracker (Voting System)                         |  |
-|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN        |  |
+|  |   + Haar fallback)        Edge, Color, Temporal)                |  |
+|  |       |                        |                                |  |
+|  |       v                        |                                |  |
+|  |  Face Analysis                 |                                |  |
+|  |  CLAHE -> MTCNN ->             |                                |  |
+|  |  EfficientNet-B0 ->            |                                |  |
+|  |  sigmoid -> probability        |                                |  |
+|  |       |                        |                                |  |
+|  |       +----------+-------------+                                |  |
+|  |                  |                                               |  |
+|  |                  v                                               |  |
+|  |       Temporal Tracker (Voting System)                          |  |
+|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN         |  |
 |  +----------------------------------------------------------------+  |
 +----------------------------------------------------------------------+
 ```
@@ -222,33 +222,38 @@ Earlier versions selected the best model checkpoint based on F1 score. The probl
 
 ## Training Metrics and Results
 
-Training was conducted on Google Colab with GPU runtime. The model was saved at the best Balanced Accuracy checkpoint.
+Training was conducted on Google Colab with GPU runtime. The model went through multiple iterations. The current (new) model represents a significant improvement over the old model in both accuracy and bias balance.
 
-### Best Checkpoint (Epoch 8 of 30)
+### Current Model Performance
 
-| Metric             | Value  |
-|--------------------|--------|
-| Training Loss      | 0.1064 |
-| Training Accuracy  | 85.0%  |
-| Validation Loss    | 0.1948 |
-| Validation Accuracy| 86.6%  |
-| Validation F1      | 0.9270 |
-| Validation AUC-ROC | 0.8445 |
+| Metric              | Old Model | New Model | Improvement |
+|---------------------|-----------|-----------|-------------|
+| Balanced Accuracy   | 86.30%    | 91.85%    | +5.55%      |
+| Real Accuracy       | 90.20%    | 91.60%    | +1.40%      |
+| Fake Accuracy       | 82.40%    | 92.10%    | +9.70%      |
+| Bias Gap            | 7.80%     | 0.50%     | -7.30%      |
+| Bias Direction      | Real-biased | Balanced | --        |
 
-### Epoch 1 Baseline (for reference)
+### Mean Predictions by Class
 
-| Metric             | Value  |
-|--------------------|--------|
-| Training Loss      | 0.7066 |
-| Training Accuracy  | 52.2%  |
-| Validation Loss    | 0.7626 |
-| Validation Accuracy| 27.8%  |
-| Validation F1      | 0.2973 |
-| Validation AUC-ROC | 0.5606 |
-| Learning Rate      | 1.56e-4|
-| Epoch Duration     | ~4.3 hours |
+| Class                        | Old Model | New Model | Ideal |
+|------------------------------|-----------|-----------|-------|
+| Real images (should be ~0.0) | 0.1824    | 0.0716    | 0.000 |
+| Fake images (should be ~1.0) | 0.6412    | 0.9143    | 1.000 |
 
-The jump from 27.8% to 86.6% validation accuracy across 8 epochs demonstrates the model learning meaningful deepfake features rather than relying on class distribution shortcuts.
+The new model scores real images much closer to 0.0 (0.0716 vs 0.1824) and fake images much closer to 1.0 (0.9143 vs 0.6412), showing substantially better separation between classes. The old model had a 7.80% accuracy gap favoring real images, meaning it was biased toward classifying inputs as real. The new model reduces that gap to just 0.50%, making it effectively balanced across both classes.
+
+### Training Progression (Old Model Baseline)
+
+| Metric             | Epoch 1 | Best (Epoch 8) |
+|--------------------|---------|-----------------|
+| Training Loss      | 0.7066  | 0.1064          |
+| Training Accuracy  | 52.2%   | 85.0%           |
+| Validation Loss    | 0.7626  | 0.1948          |
+| Validation Accuracy| 27.8%   | 86.6%           |
+| Validation F1      | 0.2973  | 0.9270          |
+| Validation AUC-ROC | 0.5606  | 0.8445          |
+| Epoch Duration     | ~4.3 hrs| --              |
 
 ### Training Log
 
