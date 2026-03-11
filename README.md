@@ -52,29 +52,29 @@ When a user clicks "Start Detection" in the extension popup, the content script 
                            | HTTP POST (localhost:5000/analyze)
                            v
 +----------------------------------------------------------------------+
-|                  FLASK BACKEND SERVER (Python)                        |
+|                  FLASK BACKEND SERVER (Python)                       |
 |                                                                      |
 |  Endpoints: /analyze, /reset, /health, /stats                        |
 |                          |                                           |
 |                          v                                           |
 |  +----------------------------------------------------------------+  |
-|  |                  DEEPFAKE DETECTOR                              |  |
-|  |                                                                 |  |
-|  |  Face Detection          Frame Forensic Analysis                |  |
+|  |                  DEEPFAKE DETECTOR                             |  |
+|  |                                                                |  |
+|  |  Face Detection          Frame Forensic Analysis               |  |
 |  |  (OpenCV DNN SSD         (6 signals: FFT, Noise, ELA,          |  |
-|  |   + Haar fallback)        Edge, Color, Temporal)                |  |
-|  |       |                        |                                |  |
-|  |       v                        |                                |  |
-|  |  Face Analysis                 |                                |  |
-|  |  CLAHE -> MTCNN ->             |                                |  |
-|  |  EfficientNet-B0 ->            |                                |  |
-|  |  sigmoid -> probability        |                                |  |
-|  |       |                        |                                |  |
-|  |       +----------+-------------+                                |  |
-|  |                  |                                               |  |
-|  |                  v                                               |  |
-|  |       Temporal Tracker (Voting System)                          |  |
-|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN         |  |
+|  |   + Haar fallback)        Edge, Color, Temporal)               |  |
+|  |       |                        |                               |  |
+|  |       v                        |                               |  |
+|  |  Face Analysis                 |                               |  |
+|  |  CLAHE -> MTCNN ->             |                               |  |
+|  |  EfficientNet-B0 ->            |                               |  |
+|  |  sigmoid -> probability        |                               |  |
+|  |       |                        |                               |  |
+|  |       +----------+-------------+                               |  |
+|  |                  |                                             |  |
+|  |                  v                                             |  |
+|  |       Temporal Tracker (Voting System)                         |  |
+|  |       10-frame majority vote -> REAL / FAKE / UNCERTAIN        |  |
 |  +----------------------------------------------------------------+  |
 +----------------------------------------------------------------------+
 ```
@@ -112,12 +112,12 @@ The output is a single scalar: the probability that the input face is fake.
 
 ### Parameter Count
 
-| Component             | Parameters   | Status    |
+| Component             | Parameters   | Status   |
 |-----------------------|-------------|-----------|
 | Stem + Blocks 0-2     | ~990,000    | Frozen    |
 | Blocks 3-15           | ~3,010,000  | Trainable |
-| Classification Head    | ~1,288,548  | Trainable |
-| **Total**             | **5,288,548** | --      |
+| Classification Head   | ~1,288,548  | Trainable |
+| **Total**             |**5,288,548**|   --      |
 | Trainable             | ~4,300,000  | 81%       |
 | Frozen                | ~990,000    | 19%       |
 
@@ -125,13 +125,13 @@ Freezing the early layers preserves general-purpose low-level feature extractors
 
 ### Model Comparison
 
-| Model            | Params | ImageNet Top-1 | Inference Speed | Suitability          |
-|-----------------|--------|----------------|-----------------|----------------------|
-| VGG-16           | 138M   | 71.5%          | Slow            | Too large, too slow   |
-| ResNet-50        | 25.6M  | 76.0%          | Medium          | 5x more params        |
-| MobileNet-V2     | 3.4M   | 72.0%          | Very fast       | Lower feature quality |
-| **EfficientNet-B0** | **5.3M** | **77.1%** | **Fast**        | **Best tradeoff**     |
-| EfficientNet-B7  | 66M    | 84.3%          | Slow            | Too slow for real-time|
+| Model               | Params   | ImageNet Top-1 | Inference Speed | Suitability           |
+|---------------------|----------|----------------|-----------------|-----------------------|
+| VGG-16              | 138M     | 71.5%          | Slow            | Too large, too slow   |
+| ResNet-50           | 25.6M    | 76.0%          | Medium          | 5x more params        |
+| MobileNet-V2        | 3.4M     | 72.0%          | Very fast       | Lower feature quality |
+| **EfficientNet-B0** | **5.3M** | **77.1%**      | **Fast**        | **Best tradeoff**     |
+| EfficientNet-B7     | 66M      | 84.3%          | Slow            | Too slow for real-time|
 
 ### What the Model Learns to Detect
 
@@ -153,9 +153,9 @@ The model picks up on artifacts that deepfake generation methods leave behind:
 The model is trained on the FaceForensics++ dataset at C23 (medium) compression, which is the standard benchmark for face manipulation detection research.
 
 | Split   | Real Samples | Fake Samples | Total   | Fake Ratio |
-|---------|-------------|-------------|---------|------------|
-| Train   | 12,750      | 76,395      | 89,145  | 85.7%      |
-| Val     | ~2,250      | ~13,488     | ~15,738 | 85.7%      |
+|---------|-------------|-------------|---------|--------------|
+| Train   | 12,750      | 76,395      | 89,145  | 85.7%        |
+| Val     | ~2,250      | ~13,488     | ~15,738 | 85.7%        |
 
 The fake samples come from five manipulation methods: DeepFakes, Face2Face, FaceSwap, FaceShifter, and NeuralTextures. Training on multiple methods helps the model generalize rather than overfit to a single forgery technique.
 
@@ -171,28 +171,28 @@ The project also includes scripts for downloading and processing the Deepfake De
 
 The training pipeline went through five iterations. The final stable version (v5) resolved oscillation issues from earlier versions by reducing the learning rate, fixing Focal Loss alpha, switching model selection from F1 to Balanced Accuracy, and disabling Mixup/CutMix (which were destroying the subtle deepfake artifact signals the model needs to learn).
 
-| Hyperparameter            | Value                                           |
-|--------------------------|------------------------------------------------|
-| Epochs                    | 30 (early stopping with patience 10)            |
+| Hyperparameter            | Value                                              |
+|---------------------------|----------------------------------------------------|
+| Epochs                    | 30 (early stopping with patience 10)               |
 | Batch Size                | 32 (effective 64 via 2-step gradient accumulation) |
-| Max Learning Rate         | 1.5e-4                                          |
-| Backbone Learning Rate    | 0.1x of head LR (1.5e-5)                       |
-| Weight Decay              | 0.01                                            |
-| Optimizer                 | AdamW                                           |
-| Scheduler                 | OneCycleLR (10% warmup, cosine annealing)       |
-| Loss Function             | Focal Loss (gamma=2.0, alpha=0.5)               |
-| Dropout Rates             | 0.5, 0.35, 0.25 (decreasing through head layers)|
-| Gradient Clipping         | max_norm=1.0                                    |
-| Mixed Precision           | Enabled (torch.cuda.amp)                        |
-| EMA Decay                 | 0.999                                           |
-| Frozen Layers             | Stem + first 3 MBConv blocks (19% of backbone)  |
-| Sampling                  | WeightedRandomSampler, 2x minority class        |
-| Model Selection Metric    | Balanced Accuracy                                |
+| Max Learning Rate         | 1.5e-4                                             |
+| Backbone Learning Rate    | 0.1x of head LR (1.5e-5)                           |
+| Weight Decay              | 0.01                                               |
+| Optimizer                 | AdamW                                              |
+| Scheduler                 | OneCycleLR (10% warmup, cosine annealing)          |
+| Loss Function             | Focal Loss (gamma=2.0, alpha=0.5)                  |
+| Dropout Rates             | 0.5, 0.35, 0.25 (decreasing through head layers)   |
+| Gradient Clipping         | max_norm=1.0                                       |
+| Mixed Precision           | Enabled (torch.cuda.amp)                           |
+| EMA Decay                 | 0.999                                              |
+| Frozen Layers             | Stem + first 3 MBConv blocks (19% of backbone)     |
+| Sampling                  | WeightedRandomSampler, 2x minority class           |
+| Model Selection Metric    | Balanced Accuracy                                  |
 
 ### Data Augmentation
 
 | Augmentation              | Parameter                              |
-|--------------------------|----------------------------------------|
+|---------------------------|----------------------------------------|
 | Random Resized Crop       | 224x224                                |
 | Horizontal Flip           | p=0.5                                  |
 | Color Jitter              | brightness, contrast, saturation, hue  |
@@ -202,7 +202,7 @@ The training pipeline went through five iterations. The final stable version (v5
 | Gaussian Blur             | kernel size                            |
 | Random Erasing            | p varies                               |
 | JPEG Compression          | quality 30-80, p=0.3                   |
-| Gaussian Noise            | sigma 0.01-0.04, p=0.15               |
+| Gaussian Noise            | sigma 0.01-0.04, p=0.15                |
 
 ### Why Focal Loss
 
@@ -226,13 +226,13 @@ Training was conducted on Google Colab with GPU runtime. The model went through 
 
 ### Current Model Performance
 
-| Metric              | Old Model | New Model | Improvement |
-|---------------------|-----------|-----------|-------------|
-| Balanced Accuracy   | 86.30%    | 91.85%    | +5.55%      |
-| Real Accuracy       | 90.20%    | 91.60%    | +1.40%      |
-| Fake Accuracy       | 82.40%    | 92.10%    | +9.70%      |
-| Bias Gap            | 7.80%     | 0.50%     | -7.30%      |
-| Bias Direction      | Real-biased | Balanced | --        |
+| Metric              | Old Model   | New Model | Improvement |
+|---------------------|-------------|-----------|-------------|
+| Balanced Accuracy   | 86.30%      | 91.85%    | +5.55%      |
+| Real Accuracy       | 90.20%      | 91.60%    | +1.40%      |
+| Fake Accuracy       | 82.40%      | 92.10%    | +9.70%      |
+| Bias Gap            | 7.80%       | 0.50%     | -7.30%      |
+| Bias Direction      | Real-biased | Balanced  | --         |
 
 ### Mean Predictions by Class
 
@@ -245,7 +245,7 @@ The new model scores real images much closer to 0.0 (0.0716 vs 0.1824) and fake 
 
 ### Training Progression (Old Model Baseline)
 
-| Metric             | Epoch 1 | Best (Epoch 8) |
+| Metric             | Epoch 1 | Best (Epoch 8)  |
 |--------------------|---------|-----------------|
 | Training Loss      | 0.7066  | 0.1064          |
 | Training Accuracy  | 52.2%   | 85.0%           |
@@ -321,7 +321,7 @@ Six independent forensic signals analyze each frame for manipulation artifacts. 
 
 Converts the frame to frequency domain using Fast Fourier Transform. Deepfakes often show reduced high-frequency content (GAN smoothing) and abnormal frequency distributions.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | Low high-frequency ratio (<0.18) | +0.40                  |
 | High mid-frequency CV (>0.6)     | +0.25                  |
@@ -331,7 +331,7 @@ Converts the frame to frequency domain using Fast Fourier Transform. Deepfakes o
 
 Analyzes the noise residual pattern across the frame. Authentic images have consistent sensor noise; deepfakes show inconsistent noise from different source images or generation artifacts.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | High noise CoV (>0.7)            | +0.50                  |
 | Low mean noise (<1.0)            | +0.30                  |
@@ -340,7 +340,7 @@ Analyzes the noise residual pattern across the frame. Authentic images have cons
 
 Recompresses the image at quality 90 and measures the pixel-level difference. Manipulated regions show different error levels than untouched regions due to double compression.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | High ELA CoV (>0.9)              | +0.50                  |
 | High mean ELA error (>15)        | +0.20                  |
@@ -349,7 +349,7 @@ Recompresses the image at quality 90 and measures the pixel-level difference. Ma
 
 Examines edge density and sharpness consistency. Deepfakes often have unnaturally smooth regions or inconsistent edge patterns around blending boundaries.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | Low edge density (<0.02)         | +0.35                  |
 | Low Laplacian variance (<50)     | +0.30                  |
@@ -358,7 +358,7 @@ Examines edge density and sharpness consistency. Deepfakes often have unnaturall
 
 Checks for unnatural color distributions. GAN-generated faces sometimes have limited color palettes or suspiciously uniform saturation/brightness.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | Uniform saturation (std<15)      | +0.30                  |
 | Uniform brightness (std<15)      | +0.25                  |
@@ -368,7 +368,7 @@ Checks for unnatural color distributions. GAN-generated faces sometimes have lim
 
 Tracks frame-to-frame differences over time. Deepfakes can produce erratic jumps or suspiciously static regions between frames.
 
-| Indicator                        | Fake Score Contribution |
+| Indicator                        | Fake Score Contribution|
 |----------------------------------|------------------------|
 | Erratic differences (CV>1.5)     | +0.40                  |
 | Near-zero differences (<0.3)     | +0.30                  |
@@ -442,7 +442,7 @@ The main analysis endpoint. Accepts a video frame and returns classification res
 ```
 
 | Field                       | Type    | Description                                           |
-|----------------------------|---------|-------------------------------------------------------|
+|-----------------------------|---------|-------------------------------------------------------|
 | success                     | bool    | Whether analysis completed without error              |
 | analysis_mode               | string  | "face+frame" when face found, "frame_only" otherwise  |
 | faces_detected              | int     | Number of faces detected in the frame                 |
@@ -526,9 +526,9 @@ An iframe injected into the page next to the video. Shows the live detection ver
 ### Extension Settings
 
 | Setting           | Default              | Description                          |
-|-------------------|---------------------|--------------------------------------|
+|-------------------|----------------------|--------------------------------------|
 | Backend URL       | http://localhost:5000| Address of the Flask backend server  |
-| Capture Interval  | 1000ms              | Time between frame captures          |
+| Capture Interval  | 1000ms               | Time between frame captures          |
 
 ---
 
@@ -538,8 +538,8 @@ These are the performance targets enforced by the test suite. Actual performance
 
 ### Latency Targets
 
-| Operation                  | Target      | Notes                              |
-|---------------------------|-------------|-------------------------------------|
+| Operation                  | Target      | Notes                               |
+|----------------------------|-------------|-------------------------------------|
 | Face Detection (DNN SSD)   | < 100ms     | Typically 5-15ms                    |
 | Face Detection (Haar)      | < 100ms     | Typically 10-30ms (fallback only)   |
 | Model Inference (GPU)      | < 200ms     | Single frame through EfficientNet   |
@@ -547,7 +547,7 @@ These are the performance targets enforced by the test suite. Actual performance
 | Full Forensic Analysis     | < 50ms      | All 6 signals                       |
 | Fast Forensic Analysis     | < 20ms      | FFT + Temporal + Edge only          |
 | Frequency Feature Extract  | < 30ms      | FFT computation                     |
-| API /analyze (end-to-end)  | < 1500ms    | Full pipeline including network      |
+| API /analyze (end-to-end)  | < 1500ms    | Full pipeline including network     |
 | API /health                | < 50ms      | Health check response               |
 | API /reset                 | < 50ms      | State reset response                |
 
@@ -570,11 +570,11 @@ The project includes 95 tests organized across four test files, covering functio
 
 ### Test Summary
 
-| Test File              | Tests | Focus                                        |
-|------------------------|-------|----------------------------------------------|
-| test_functional.py     | 36    | Model loading, face detection, forensics, temporal tracker, API endpoints |
-| test_algorithm.py      | 19    | Threshold behavior, voting accuracy, forensic signal logic, stability scores |
-| test_performance.py    | 12    | Latency targets, parameter counts, weight file size, batch throughput |
+| Test File              | Tests | Focus                                                                                                 |
+|------------------------|-------|-------------------------------------------------------------------------------------------------------|
+| test_functional.py     | 36    | Model loading, face detection, forensics, temporal tracker, API endpoints                             |
+| test_algorithm.py      | 19    | Threshold behavior, voting accuracy, forensic signal logic, stability scores                          |
+| test_performance.py    | 12    | Latency targets, parameter counts, weight file size, batch throughput                                 |
 | test_reliability.py    | 28    | Malformed input handling, resolution variance, determinism, format support, rate limiting, continuous operation |
 
 ### Running Tests
@@ -651,7 +651,7 @@ pip install -r requirements.txt
 
 The required packages are:
 
-| Package            | Minimum Version | Purpose                                |
+| Package            | Minimum Version| Purpose                                |
 |--------------------|----------------|----------------------------------------|
 | torch              | 1.9.0          | Deep learning framework                |
 | torchvision        | 0.10.0         | EfficientNet-B0 pretrained model       |
@@ -849,7 +849,7 @@ flask-cors>=3.0.10
 
 | Component | Minimum          | Recommended                          |
 |-----------|------------------|--------------------------------------|
-| GPU       | None (CPU works) | NVIDIA GPU with 4GB+ VRAM and CUDA  |
+| GPU       | None (CPU works) | NVIDIA GPU with 4GB+ VRAM and CUDA   |
 | RAM       | 8GB              | 16GB                                 |
 | Storage   | 500MB (weights)  | 100GB+ (if training with datasets)   |
 
